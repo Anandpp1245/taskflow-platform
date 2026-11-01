@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api-gateway, user-service, task-service, notification-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image name and tag
+        run: |
+          OWNER=${GITHUB_REPOSITORY_OWNER,,}
+          echo "IMAGE=ghcr.io/${OWNER}/taskflow-${{ matrix.service }}" >> $GITHUB_ENV
+          echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.TAG }}
+            ${{ env.IMAGE }}:latest
+
+  update-gitops:
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency: gitops-update
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/taskflow-gitops
+          token: ${{ secrets.GITOPS_PAT }}
+          path: gitops
+
+      - name: Bump image tags
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          cd gitops
+          OWNER=${OWNER,,}
+          TAG=${GITHUB_SHA::7}
+          for svc in api-gateway user-service task-service notification-service; do
+            grep -rl "ghcr.io/${OWNER}/taskflow-${svc}:" . | xargs -r \
+              sed -i "s|\(ghcr.io/${OWNER}/taskflow-${svc}:\)[^\"[:space:]]*|\1${TAG}|g"
+          done
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git diff --quiet && echo "No changes" && exit 0
+          git commit -am "deploy: taskflow ${TAG}"
+          git pull --rebase && git push
