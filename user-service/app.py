@@ -1,22 +1,30 @@
-from flask import Flask, jsonify
-from datetime import datetime, timezone
+from flask import Flask, jsonify, request
+
 app = Flask(__name__)
-users = {
-'1': {'id': '1', 'name': 'Alice DevOps', 'email': 'alice@example.com',
-'role': 'DevOps Engineer', 'created_at': '2024-01-15'},
-'2': {'id': '2', 'name': 'Bob SRE', 'email': 'bob@example.com',
-'role': 'SRE', 'created_at': '2024-01-20'}
-}
+users = {}
+
+
 @app.route('/health')
 def health():
-return jsonify(status='healthy', service='user-service',
-timestamp=datetime.now(timezone.utc).isoformat()), 200
-@app.route('/users/<user_id>')
-def get_user(user_id):
-user = users.get(user_id)
-return (jsonify(user), 200) if user else (jsonify(error='User not found'), 404)
-@app.route('/users')
+    return jsonify(status='healthy', service='user-service')
+
+
+@app.route('/users', methods=['GET'])
 def list_users():
-return jsonify(count=len(users), users=list(users.values())), 200
-if __name__ == '__main__':
-app.run(host='0.0.0.0', port=5002)
+    return jsonify(list(users.values()))
+
+
+@app.route('/users', methods=['POST'])
+def create_user():
+    data = request.get_json() or {}
+    uid = len(users) + 1
+    users[uid] = {'id': uid, 'name': data.get('name'), 'email': data.get('email')}
+    return jsonify(users[uid]), 201
+
+
+@app.route('/users/<int:uid>', methods=['GET'])
+def get_user(uid):
+    user = users.get(uid)
+    if not user:
+        return jsonify(error='not found'), 404
+    return jsonify(user)
